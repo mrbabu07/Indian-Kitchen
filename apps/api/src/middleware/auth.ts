@@ -1,0 +1,3 @@
+import { NextFunction, Response } from 'express'; import jwt from 'jsonwebtoken'; import { config } from '../config'; import { AuthRequest, Role, StaffToken } from '../types';
+export function auth(req:AuthRequest,res:Response,next:NextFunction){const token=req.headers.authorization?.replace(/^Bearer /,'');if(!token)return res.status(401).json({message:'Authentication required'});try{req.staff=jwt.verify(token,config.JWT_SECRET) as StaffToken;next()}catch{return res.status(401).json({message:'Invalid or expired session'})}}
+export const permit=(...roles:Role[])=>(req:AuthRequest,res:Response,next:NextFunction)=>roles.includes(req.staff!.role)?next():res.status(403).json({message:'Not permitted'});

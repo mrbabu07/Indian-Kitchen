@@ -1,0 +1,3 @@
+export const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:4000';
+export async function api<T=any>(path:string,options:RequestInit={}){const token=typeof window!=='undefined'?localStorage.getItem('token'):null;const r=await fetch(`${API}${path}`,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers},cache:'no-store'});const data=await r.json().catch(()=>null);if(!r.ok)throw new Error(data?.message||'Something went wrong');return data as T}
+export const money=(v:any)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(v));
