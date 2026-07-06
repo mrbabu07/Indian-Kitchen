@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import QRCode from 'qrcode';
+import multer from 'multer';
 import { z } from 'zod';
 import { query } from '../db';
 import { auth, permit } from '../middleware/auth';
@@ -9,6 +10,21 @@ import { AuthRequest } from '../types';
 
 export const adminRouter = Router();
 adminRouter.use(auth, permit('admin'));
+const imageUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1},fileFilter:(_req,file,done)=>done(null,['image/jpeg','image/png','image/webp'].includes(file.mimetype))});
+
+adminRouter.post('/uploads/image',imageUpload.single('image'),async(req,res,next)=>{
+  try{
+    if(!config.IMGBB_API_KEY)return res.status(503).json({message:'ImgBB is not configured'});
+    if(!req.file)return res.status(400).json({message:'Choose a JPG, PNG or WebP image up to 8 MB'});
+    const form=new FormData();
+    form.append('image',new Blob([new Uint8Array(req.file.buffer)],{type:req.file.mimetype}),req.file.originalname);
+    form.append('name',req.file.originalname.replace(/\.[^.]+$/,''));
+    const response=await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(config.IMGBB_API_KEY)}`,{method:'POST',body:form});
+    const result:any=await response.json();
+    if(!response.ok||!result.success)throw new Error(result?.error?.message||'Image upload failed');
+    res.status(201).json({url:result.data.display_url||result.data.url,thumbnailUrl:result.data.thumb?.url,width:Number(result.data.width),height:Number(result.data.height),deleteUrl:result.data.delete_url});
+  }catch(e){next(e)}
+});
 
 const categorySchema = z.object({ name:z.string().min(2), description:z.string().optional().nullable(), sort_order:z.coerce.number().int().default(0), active:z.boolean().default(true) });
 const menuSchema = z.object({ category_id:z.string().uuid(), name:z.string().min(2), description:z.string().optional().nullable(), price:z.coerce.number().nonnegative(), image_url:z.string().optional().nullable(), food_type:z.enum(['veg','non_veg']), available:z.boolean().default(true) });
