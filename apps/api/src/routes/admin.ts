@@ -1,124 +1,40 @@
-import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import QRCode from 'qrcode';
-import multer from 'multer';
-import { z } from 'zod';
-import { query } from '../db';
-import { auth, permit } from '../middleware/auth';
-import { config } from '../config';
-import { AuthRequest } from '../types';
+import { Router } from 'express';import bcrypt from 'bcryptjs';import QRCode from 'qrcode';import multer from 'multer';import PDFDocument from 'pdfkit';import { z } from 'zod';import { query,transaction } from '../db';import { auth,permit } from '../middleware/auth';import { config } from '../config';import { AuthRequest } from '../types';import { audit } from '../lib/audit';import { getOrder,nextStatus,emitOrder } from '../lib/orders';
+export const adminRouter=Router();adminRouter.use(auth,permit('admin'));
+const branchFor=(req:AuthRequest,body?:any)=>String(body?.branch_id||req.query.branchId||req.staff!.branchId);
+const imageUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1},fileFilter:(_r,f,d)=>d(null,['image/jpeg','image/png','image/webp'].includes(f.mimetype))});
 
-export const adminRouter = Router();
-adminRouter.use(auth, permit('admin'));
-const imageUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1},fileFilter:(_req,file,done)=>done(null,['image/jpeg','image/png','image/webp'].includes(file.mimetype))});
+adminRouter.post('/uploads/image',imageUpload.single('image'),async(req,res,next)=>{try{if(!config.IMGBB_API_KEY)return res.status(503).json({message:'ImgBB is not configured'});if(!req.file)return res.status(400).json({message:'Choose a JPG, PNG or WebP image up to 8 MB'});const form=new FormData();form.append('image',new Blob([new Uint8Array(req.file.buffer)],{type:req.file.mimetype}),req.file.originalname);form.append('name',req.file.originalname.replace(/\.[^.]+$/,''));const response=await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(config.IMGBB_API_KEY)}`,{method:'POST',body:form});const result:any=await response.json();if(!response.ok||!result.success)throw new Error(result?.error?.message||'Image upload failed');res.status(201).json({url:result.data.display_url||result.data.url,thumbnailUrl:result.data.thumb?.url})}catch(e){next(e)}});
 
-adminRouter.post('/uploads/image',imageUpload.single('image'),async(req,res,next)=>{
-  try{
-    if(!config.IMGBB_API_KEY)return res.status(503).json({message:'ImgBB is not configured'});
-    if(!req.file)return res.status(400).json({message:'Choose a JPG, PNG or WebP image up to 8 MB'});
-    const form=new FormData();
-    form.append('image',new Blob([new Uint8Array(req.file.buffer)],{type:req.file.mimetype}),req.file.originalname);
-    form.append('name',req.file.originalname.replace(/\.[^.]+$/,''));
-    const response=await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(config.IMGBB_API_KEY)}`,{method:'POST',body:form});
-    const result:any=await response.json();
-    if(!response.ok||!result.success)throw new Error(result?.error?.message||'Image upload failed');
-    res.status(201).json({url:result.data.display_url||result.data.url,thumbnailUrl:result.data.thumb?.url,width:Number(result.data.width),height:Number(result.data.height),deleteUrl:result.data.delete_url});
-  }catch(e){next(e)}
-});
-
-const categorySchema = z.object({ name:z.string().min(2), description:z.string().optional().nullable(), sort_order:z.coerce.number().int().default(0), active:z.boolean().default(true) });
-const menuSchema = z.object({ category_id:z.string().uuid(), name:z.string().min(2), description:z.string().optional().nullable(), price:z.coerce.number().nonnegative(), image_url:z.string().optional().nullable(), food_type:z.enum(['veg','non_veg']), available:z.boolean().default(true) });
-const tableSchema = z.object({ name:z.string().min(1), capacity:z.coerce.number().int().positive(), active:z.boolean().default(true) });
-const resources = {
-  categories:{ table:'categories', fields:['name','description','sort_order','active'], schema:categorySchema },
-  menu:{ table:'menu_items', fields:['category_id','name','description','price','image_url','food_type','available'], schema:menuSchema },
-  tables:{ table:'restaurant_tables', fields:['name','capacity','active'], schema:tableSchema }
-} as const;
-
-for (const [path, resource] of Object.entries(resources)) {
-  adminRouter.get(`/${path}`, async (req:AuthRequest, res, next) => {
-    try {
-      const sql = path === 'menu'
-        ? 'SELECT m.*,c.name category_name FROM menu_items m JOIN categories c ON c.id=m.category_id WHERE m.branch_id=$1 ORDER BY c.sort_order,m.name'
-        : `SELECT * FROM ${resource.table} WHERE branch_id=$1 ORDER BY created_at DESC`;
-      res.json((await query(sql, [req.staff!.branchId])).rows);
-    } catch (e) { next(e); }
-  });
-  adminRouter.post(`/${path}`, async (req:AuthRequest, res, next) => {
-    try {
-      const parsed = resource.schema.parse(req.body) as Record<string,unknown>;
-      const fields = resource.fields.filter(field => parsed[field] !== undefined);
-      const values = fields.map(field => parsed[field]);
-      const result = await query(`INSERT INTO ${resource.table}(branch_id,${fields.join(',')}) VALUES($1,${fields.map((_,i) => `$${i+2}`).join(',')}) RETURNING *`, [req.staff!.branchId,...values]);
-      res.status(201).json(result.rows[0]);
-    } catch (e) { next(e); }
-  });
-  adminRouter.patch(`/${path}/:id`, async (req:AuthRequest, res, next) => {
-    try {
-      const parsed = resource.schema.partial().parse(req.body) as Record<string,unknown>;
-      const fields = resource.fields.filter(field => parsed[field] !== undefined);
-      if (!fields.length) return res.status(400).json({message:'No changes supplied'});
-      const values = fields.map(field => parsed[field]);
-      const result = await query(`UPDATE ${resource.table} SET ${fields.map((field,i) => `${field}=$${i+1}`).join(',')}${resource.table === 'menu_items' ? ',updated_at=now()' : ''} WHERE id=$${fields.length+1} AND branch_id=$${fields.length+2} RETURNING *`, [...values,String(req.params.id),req.staff!.branchId]);
-      if (!result.rows[0]) return res.status(404).json({message:'Record not found'});
-      res.json(result.rows[0]);
-    } catch (e) { next(e); }
-  });
-  adminRouter.delete(`/${path}/:id`, async (req:AuthRequest, res, next) => {
-    try {
-      const result = await query(`DELETE FROM ${resource.table} WHERE id=$1 AND branch_id=$2 RETURNING id`, [String(req.params.id),req.staff!.branchId]);
-      if (!result.rows[0]) return res.status(404).json({message:'Record not found'});
-      res.status(204).end();
-    } catch (e) { next(e); }
-  });
+const categorySchema=z.object({name:z.string().min(2),description:z.string().optional().nullable(),sort_order:z.coerce.number().int().default(0),active:z.boolean().default(true)});
+const menuSchema=z.object({category_id:z.string().uuid(),name:z.string().min(2),description:z.string().optional().nullable(),price:z.coerce.number().nonnegative(),image_url:z.string().optional().nullable(),food_type:z.enum(['veg','non_veg']),available:z.boolean().default(true),sort_order:z.coerce.number().int().default(0)});
+const tableSchema=z.object({name:z.string().min(1),capacity:z.coerce.number().int().positive(),active:z.boolean().default(true)});
+const resources:any={categories:{table:'categories',fields:['name','description','sort_order','active'],schema:categorySchema},menu:{table:'menu_items',fields:['category_id','name','description','price','image_url','food_type','available','sort_order'],schema:menuSchema},tables:{table:'restaurant_tables',fields:['name','capacity','active'],schema:tableSchema}};
+for(const[path,resource]of Object.entries<any>(resources)){
+ adminRouter.get(`/${path}`,async(req:AuthRequest,res,next)=>{try{const branchId=branchFor(req);const sql=path==='menu'?'SELECT m.*,c.name category_name FROM menu_items m JOIN categories c ON c.id=m.category_id WHERE m.branch_id=$1 ORDER BY c.sort_order,m.sort_order,m.name':`SELECT * FROM ${resource.table} WHERE branch_id=$1 ORDER BY created_at DESC`;res.json((await query(sql,[branchId])).rows)}catch(e){next(e)}});
+ adminRouter.post(`/${path}`,async(req:AuthRequest,res,next)=>{try{const branchId=branchFor(req,req.body),parsed=resource.schema.parse(req.body),fields=resource.fields.filter((f:string)=>parsed[f]!==undefined),values=fields.map((f:string)=>parsed[f]);const row=(await query(`INSERT INTO ${resource.table}(branch_id,${fields.join(',')}) VALUES($1,${fields.map((_:any,i:number)=>`$${i+2}`).join(',')}) RETURNING *`,[branchId,...values])).rows[0];await audit({branchId,userId:req.staff!.id,action:`${path}.create`,entityType:resource.table,entityId:row.id,after:row});res.status(201).json(row)}catch(e){next(e)}});
+ adminRouter.patch(`/${path}/:id`,async(req:AuthRequest,res,next)=>{try{const branchId=branchFor(req,req.body),id=String(req.params.id),before=(await query(`SELECT * FROM ${resource.table} WHERE id=$1 AND branch_id=$2`,[id,branchId])).rows[0];if(!before)return res.status(404).json({message:'Record not found'});const parsed=resource.schema.partial().parse(req.body),fields=resource.fields.filter((f:string)=>parsed[f]!==undefined);if(!fields.length)return res.status(400).json({message:'No changes supplied'});const values=fields.map((f:string)=>parsed[f]);const row=(await query(`UPDATE ${resource.table} SET ${fields.map((f:string,i:number)=>`${f}=$${i+1}`).join(',')}${resource.table==='menu_items'?',updated_at=now()':''} WHERE id=$${fields.length+1} RETURNING *`,[...values,id])).rows[0];await audit({branchId,userId:req.staff!.id,action:`${path}.update`,entityType:resource.table,entityId:id,before,after:row});res.json(row)}catch(e){next(e)}});
+ adminRouter.delete(`/${path}/:id`,async(req:AuthRequest,res,next)=>{try{const branchId=branchFor(req),id=String(req.params.id),before=(await query(`SELECT * FROM ${resource.table} WHERE id=$1 AND branch_id=$2`,[id,branchId])).rows[0];if(!before)return res.status(404).json({message:'Record not found'});await query(`DELETE FROM ${resource.table} WHERE id=$1`,[id]);await audit({branchId,userId:req.staff!.id,action:`${path}.delete`,entityType:resource.table,entityId:id,before});res.status(204).end()}catch(e){next(e)}});
 }
 
-adminRouter.get('/branches', async (req:AuthRequest,res,next) => {
-  try { res.json((await query('SELECT id,name,slug,address,phone,gst_number,gst_percent,active FROM branches WHERE id=$1', [req.staff!.branchId])).rows); }
-  catch (e) { next(e); }
-});
+adminRouter.patch('/bulk/menu-availability',async(req:AuthRequest,res,next)=>{try{const{ids,available,branch_id}=z.object({ids:z.array(z.string().uuid()).min(1),available:z.boolean(),branch_id:z.string().uuid().optional()}).parse(req.body),branchId=branch_id||req.staff!.branchId;const rows=(await query('UPDATE menu_items SET available=$1,updated_at=now() WHERE id=ANY($2::uuid[]) AND branch_id=$3 RETURNING id,name,available',[available,ids,branchId])).rows;await audit({branchId,userId:req.staff!.id,action:'menu.bulk_availability',entityType:'menu_item',after:rows,metadata:{ids,available}});res.json(rows)}catch(e){next(e)}});
 
-adminRouter.patch('/branches/:id', async (req:AuthRequest,res,next) => {
-  try {
-    if (String(req.params.id) !== req.staff!.branchId) return res.status(403).json({message:'You can only manage your assigned branch'});
-    const parsed = z.object({ name:z.string().min(2).optional(), address:z.string().min(4).optional(), phone:z.string().optional(), gst_number:z.string().optional(), gst_percent:z.coerce.number().min(0).max(100).optional(), razorpay_key_id:z.string().optional(), razorpay_key_secret:z.string().optional() }).parse(req.body);
-    const fields = Object.keys(parsed), values = Object.values(parsed);
-    if (!fields.length) return res.status(400).json({message:'No changes supplied'});
-    const result = await query(`UPDATE branches SET ${fields.map((field,i) => `${field}=$${i+1}`).join(',')},updated_at=now() WHERE id=$${fields.length+1} RETURNING id,name,slug,address,phone,gst_number,gst_percent,active`, [...values,req.staff!.branchId]);
-    res.json(result.rows[0]);
-  } catch (e) { next(e); }
-});
+adminRouter.get('/branches',async(_req,res,next)=>{try{res.json((await query('SELECT id,name,slug,address,phone,gst_number,gst_percent,active,created_at FROM branches ORDER BY name')).rows)}catch(e){next(e)}});
+adminRouter.post('/branches',async(req:AuthRequest,res,next)=>{try{const p=z.object({name:z.string().min(2),slug:z.string().regex(/^[a-z0-9-]+$/),address:z.string().min(4),phone:z.string().optional(),gst_number:z.string().optional(),gst_percent:z.coerce.number().min(0).max(100).default(5)}).parse(req.body);const row=(await query('INSERT INTO branches(name,slug,address,phone,gst_number,gst_percent) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,slug,address,phone,gst_number,gst_percent,active',[p.name,p.slug,p.address,p.phone,p.gst_number,p.gst_percent])).rows[0];await audit({branchId:row.id,userId:req.staff!.id,action:'branch.create',entityType:'branch',entityId:row.id,after:row});res.status(201).json(row)}catch(e){next(e)}});
+adminRouter.patch('/branches/:id',async(req:AuthRequest,res,next)=>{try{const id=String(req.params.id),before=(await query('SELECT * FROM branches WHERE id=$1',[id])).rows[0];if(!before)return res.status(404).json({message:'Branch not found'});const p=z.object({name:z.string().min(2).optional(),address:z.string().min(4).optional(),phone:z.string().optional(),gst_number:z.string().optional(),gst_percent:z.coerce.number().min(0).max(100).optional(),razorpay_key_id:z.string().optional(),razorpay_key_secret:z.string().optional(),active:z.boolean().optional()}).parse(req.body),fields=Object.keys(p),values=Object.values(p);if(!fields.length)return res.status(400).json({message:'No changes supplied'});const row=(await query(`UPDATE branches SET ${fields.map((f,i)=>`${f}=$${i+1}`).join(',')},updated_at=now() WHERE id=$${fields.length+1} RETURNING id,name,slug,address,phone,gst_number,gst_percent,active`,[...values,id])).rows[0];await audit({branchId:id,userId:req.staff!.id,action:'branch.update',entityType:'branch',entityId:id,before:{...before,razorpay_key_secret:undefined},after:row});res.json(row)}catch(e){next(e)}});
 
-adminRouter.get('/staff', async (req:AuthRequest,res,next) => {
-  try { res.json((await query('SELECT id,name,email,role,active,created_at FROM users WHERE branch_id=$1 ORDER BY created_at DESC', [req.staff!.branchId])).rows); }
-  catch (e) { next(e); }
-});
-adminRouter.post('/staff', async (req:AuthRequest,res,next) => {
-  try {
-    const parsed = z.object({name:z.string().min(2),email:z.string().email(),password:z.string().min(6),role:z.enum(['operator','kitchen'])}).parse(req.body);
-    const passwordHash = await bcrypt.hash(parsed.password,12);
-    const result = await query('INSERT INTO users(branch_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,active', [req.staff!.branchId,parsed.name,parsed.email,passwordHash,parsed.role]);
-    res.status(201).json(result.rows[0]);
-  } catch (e) { next(e); }
-});
-adminRouter.patch('/staff/:id', async (req:AuthRequest,res,next) => {
-  try {
-    const parsed = z.object({name:z.string().min(2).optional(),role:z.enum(['operator','kitchen']).optional(),active:z.boolean().optional(),password:z.string().min(6).optional()}).parse(req.body);
-    const update:Record<string,unknown> = {...parsed};
-    if (parsed.password) { update.password_hash = await bcrypt.hash(parsed.password,12); delete update.password; }
-    const fields = Object.keys(update), values = Object.values(update);
-    if (!fields.length) return res.status(400).json({message:'No changes supplied'});
-    const result = await query(`UPDATE users SET ${fields.map((field,i) => `${field}=$${i+1}`).join(',')},updated_at=now() WHERE id=$${fields.length+1} AND branch_id=$${fields.length+2} AND role!='admin' RETURNING id,name,email,role,active`, [...values,String(req.params.id),req.staff!.branchId]);
-    if (!result.rows[0]) return res.status(404).json({message:'Staff member not found'});
-    res.json(result.rows[0]);
-  } catch (e) { next(e); }
-});
+adminRouter.get('/staff',async(req:AuthRequest,res,next)=>{try{res.json((await query('SELECT id,name,email,role,branch_id,active,created_at FROM users WHERE branch_id=$1 ORDER BY created_at DESC',[branchFor(req)])).rows)}catch(e){next(e)}});
+adminRouter.post('/staff',async(req:AuthRequest,res,next)=>{try{const p=z.object({name:z.string().min(2),email:z.string().email(),password:z.string().min(6),role:z.enum(['admin','operator','kitchen']),branch_id:z.string().uuid().optional()}).parse(req.body),branchId=p.branch_id||req.staff!.branchId,hash=await bcrypt.hash(p.password,12);const row=(await query('INSERT INTO users(branch_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,branch_id,active',[branchId,p.name,p.email,hash,p.role])).rows[0];await audit({branchId,userId:req.staff!.id,action:'staff.create',entityType:'user',entityId:row.id,after:row});res.status(201).json(row)}catch(e){next(e)}});
+adminRouter.patch('/staff/:id',async(req:AuthRequest,res,next)=>{try{const id=String(req.params.id),before=(await query('SELECT id,name,email,role,branch_id,active FROM users WHERE id=$1',[id])).rows[0];if(!before)return res.status(404).json({message:'Staff member not found'});const p=z.object({name:z.string().min(2).optional(),role:z.enum(['admin','operator','kitchen']).optional(),branch_id:z.string().uuid().optional(),active:z.boolean().optional(),password:z.string().min(6).optional()}).parse(req.body),update:any={...p};if(p.password){update.password_hash=await bcrypt.hash(p.password,12);delete update.password}const fields=Object.keys(update),values=Object.values(update);if(!fields.length)return res.status(400).json({message:'No changes supplied'});const row=(await query(`UPDATE users SET ${fields.map((f,i)=>`${f}=$${i+1}`).join(',')},updated_at=now() WHERE id=$${fields.length+1} RETURNING id,name,email,role,branch_id,active`,[...values,id])).rows[0];if(p.active===false)await query('UPDATE staff_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[id]);await audit({branchId:row.branch_id,userId:req.staff!.id,action:'staff.update',entityType:'user',entityId:id,before,after:row});res.json(row)}catch(e){next(e)}});
 
-adminRouter.get('/tables/:id/qr', async (req:AuthRequest,res,next) => {
-  try {
-    const result = await query('SELECT qr_token,name FROM restaurant_tables WHERE id=$1 AND branch_id=$2', [String(req.params.id),req.staff!.branchId]);
-    if (!result.rows[0]) return res.status(404).end();
-    const png = await QRCode.toBuffer(`${config.PUBLIC_APP_URL}/menu/${result.rows[0].qr_token}`, {width:900,margin:2,color:{dark:'#21160f',light:'#fffaf0'}});
-    res.type('png').attachment(`${result.rows[0].name.replace(/\s+/g,'-').toLowerCase()}-qr.png`).send(png);
-  } catch (e) { next(e); }
-});
+adminRouter.post('/tables/:id/regenerate-qr',async(req:AuthRequest,res,next)=>{try{const id=String(req.params.id),branchId=branchFor(req),before=(await query('SELECT qr_token FROM restaurant_tables WHERE id=$1 AND branch_id=$2',[id,branchId])).rows[0];if(!before)return res.status(404).json({message:'Table not found'});const row=(await query('UPDATE restaurant_tables SET qr_token=gen_random_uuid() WHERE id=$1 RETURNING id,name,qr_token',[id])).rows[0];await audit({branchId,userId:req.staff!.id,action:'table.regenerate_qr',entityType:'restaurant_table',entityId:id,before,after:row});res.json(row)}catch(e){next(e)}});
+adminRouter.get('/tables/:id/qr',async(req:AuthRequest,res,next)=>{try{const row=(await query('SELECT qr_token,name FROM restaurant_tables WHERE id=$1 AND branch_id=$2',[String(req.params.id),branchFor(req)])).rows[0];if(!row)return res.status(404).end();const png=await QRCode.toBuffer(`${config.PUBLIC_APP_URL}/menu/${row.qr_token}`,{width:900,margin:2,color:{dark:'#21160f',light:'#fffaf0'}});res.type('png').attachment(`${row.name.replace(/\s+/g,'-').toLowerCase()}-qr.png`).send(png)}catch(e){next(e)}});
+adminRouter.get('/tables/qr/bulk',async(req:AuthRequest,res,next)=>{try{const branchId=branchFor(req),tables=(await query('SELECT name,qr_token FROM restaurant_tables WHERE branch_id=$1 AND active=true ORDER BY name',[branchId])).rows;const doc=new PDFDocument({size:'A4',margin:40});res.type('pdf').attachment('table-qr-codes.pdf');doc.pipe(res);for(let i=0;i<tables.length;i++){if(i&&i%4===0)doc.addPage();const col=i%2,row=Math.floor((i%4)/2),x=40+col*270,y=40+row*380;const png=await QRCode.toBuffer(`${config.PUBLIC_APP_URL}/menu/${tables[i].qr_token}`,{width:220,margin:1});doc.fontSize(18).text(tables[i].name,x,y,{width:220,align:'center'});doc.image(png,x,y+30,{width:220});doc.fontSize(8).text(`${config.PUBLIC_APP_URL}/menu/${tables[i].qr_token}`,x,y+260,{width:220,align:'center'})}doc.end()}catch(e){next(e)}});
+
+adminRouter.get('/orders',async(req:AuthRequest,res,next)=>{try{const params:any[]=[],where:string[]=[];for(const[key,column]of[['branchId','o.branch_id'],['status','o.status'],['paymentMethod','o.payment_method']]as any){if(typeof req.query[key]==='string'&&req.query[key]!=='all'){params.push(req.query[key]);where.push(`${column}=$${params.length}`)}}if(typeof req.query.from==='string'){params.push(req.query.from);where.push(`o.created_at>=$${params.length}::date`)}if(typeof req.query.to==='string'){params.push(req.query.to);where.push(`o.created_at<$${params.length}::date+interval '1 day'`)}const result=await query(`SELECT o.*,t.name table_name,b.name branch_name FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN branches b ON b.id=o.branch_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY o.created_at DESC LIMIT 1000`,params);res.json(result.rows)}catch(e){next(e)}});
+adminRouter.get('/orders/:id/details',async(req,res,next)=>{try{const order=await getOrder(String(req.params.id));order?res.json(order):res.status(404).json({message:'Order not found'})}catch(e){next(e)}});
+adminRouter.patch('/orders/:id/override',async(req:AuthRequest,res,next)=>{try{const{status,reason}=z.object({status:z.enum(['placed','accepted','preparing','ready','served','cancelled']),reason:z.string().min(3).max(500)}).parse(req.body),id=String(req.params.id),order:any=await getOrder(id);if(!order)return res.status(404).json({message:'Order not found'});await transaction(c=>nextStatus(c,id,status,order.branch_id,req.staff!.id,reason,true));res.json(await emitOrder(req.app.get('io'),id))}catch(e){next(e)}});
+
+adminRouter.get('/reports/orders',async(req,res,next)=>{try{const from=z.string().optional().parse(req.query.from),to=z.string().optional().parse(req.query.to),branchId=typeof req.query.branchId==='string'?req.query.branchId:null,format=req.query.format==='pdf'?'pdf':'csv';const rows=(await query(`SELECT o.order_number,b.name branch,t.name table_name,o.status,o.payment_method,o.payment_status,o.subtotal,o.tax_amount,o.total,o.created_at FROM orders o JOIN branches b ON b.id=o.branch_id JOIN restaurant_tables t ON t.id=o.table_id WHERE ($1::uuid IS NULL OR o.branch_id=$1) AND o.created_at>=COALESCE($2::date,current_date-30) AND o.created_at<COALESCE($3::date+interval '1 day',now()+interval '1 day') ORDER BY o.created_at`,[branchId,from||null,to||null])).rows;if(format==='csv'){const esc=(v:any)=>`"${String(v??'').replace(/"/g,'""')}"`;res.type('csv').attachment('orders.csv').send(['Order,Branch,Table,Status,Payment Method,Payment Status,Subtotal,Tax,Total,Created',...rows.map(r=>[r.order_number,r.branch,r.table_name,r.status,r.payment_method,r.payment_status,r.subtotal,r.tax_amount,r.total,r.created_at.toISOString()].map(esc).join(','))].join('\n'));return}const doc=new PDFDocument({size:'A4',layout:'landscape',margin:30});res.type('pdf').attachment('orders-report.pdf');doc.pipe(res);doc.fontSize(18).text('Indian Kitchen — Order Report').moveDown();rows.forEach(r=>doc.fontSize(8).text(`#${r.order_number} | ${r.branch} | ${r.table_name} | ${r.status} | ${r.payment_method}/${r.payment_status} | Rs ${r.total} | ${r.created_at.toLocaleString('en-IN')}`));doc.end()}catch(e){next(e)}});
+
+adminRouter.get('/analytics/overview',async(req,res,next)=>{try{const branchId=typeof req.query.branchId==='string'?req.query.branchId:null,range=req.query.range==='weekly'?7:req.query.range==='monthly'?30:1;const params=[branchId,range];const[summary,payments,prep,peak,branches,top]=await Promise.all([query(`SELECT count(*) orders,COALESCE(sum(total) FILTER(WHERE payment_status='paid'),0) revenue,COALESCE(avg(total) FILTER(WHERE payment_status='paid'),0) average_order_value FROM orders WHERE ($1::uuid IS NULL OR branch_id=$1) AND created_at>=current_date-$2::int+1`,params),query(`SELECT payment_method,count(*) orders,COALESCE(sum(total) FILTER(WHERE payment_status='paid'),0) total FROM orders WHERE ($1::uuid IS NULL OR branch_id=$1) AND created_at>=current_date-$2::int+1 GROUP BY payment_method`,params),query(`SELECT COALESCE(avg(extract(epoch FROM (ready_at-accepted_at))/60),0) average_preparation_minutes FROM orders WHERE ($1::uuid IS NULL OR branch_id=$1) AND accepted_at IS NOT NULL AND ready_at IS NOT NULL AND created_at>=current_date-$2::int+1`,params),query(`SELECT extract(hour FROM created_at)::int hour_of_day,count(*) orders FROM orders WHERE ($1::uuid IS NULL OR branch_id=$1) AND created_at>=current_date-$2::int+1 GROUP BY extract(hour FROM created_at)::int ORDER BY orders DESC`,params),query(`SELECT b.id,b.name,count(o.id) orders,COALESCE(sum(o.total) FILTER(WHERE o.payment_status='paid'),0) revenue FROM branches b LEFT JOIN orders o ON o.branch_id=b.id AND o.created_at>=current_date-$2::int+1 WHERE ($1::uuid IS NULL OR b.id=$1) GROUP BY b.id ORDER BY revenue DESC`,params),query(`SELECT oi.item_name,sum(oi.quantity)::int quantity,sum(oi.line_total) revenue FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE ($1::uuid IS NULL OR o.branch_id=$1) AND o.created_at>=current_date-$2::int+1 GROUP BY oi.item_name ORDER BY quantity DESC LIMIT 10`,params)]);res.json({summary:summary.rows[0],paymentBreakdown:payments.rows,preparation:prep.rows[0],peakHours:peak.rows,branches:branches.rows,topItems:top.rows})}catch(e){next(e)}});
+adminRouter.get('/audit-logs',async(req,res,next)=>{try{const branchId=typeof req.query.branchId==='string'?req.query.branchId:null;res.json((await query(`SELECT a.*,u.name user_name,u.role user_role,b.name branch_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN branches b ON b.id=a.branch_id WHERE ($1::uuid IS NULL OR a.branch_id=$1) ORDER BY a.created_at DESC LIMIT 1000`,[branchId])).rows)}catch(e){next(e)}});

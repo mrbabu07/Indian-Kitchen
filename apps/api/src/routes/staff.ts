@@ -1,71 +1,28 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { query, transaction } from '../db';
-import { auth, permit } from '../middleware/auth';
+import { query,transaction } from '../db';
+import { auth,permit,requestedBranch } from '../middleware/auth';
 import { AuthRequest } from '../types';
-import { emitOrder, nextStatus } from '../lib/orders';
+import { emitOrder,getOrder,nextStatus } from '../lib/orders';
+import { audit } from '../lib/audit';
 
-export const staffRouter = Router();
-staffRouter.use(auth);
+export const staffRouter=Router();staffRouter.use(auth);
 
-staffRouter.get('/orders', async (req:AuthRequest,res,next) => {
-  try {
-    const active=req.query.active==='true';
-    let where='o.branch_id=$1';
-    if(active)where+=" AND o.status NOT IN ('served','cancelled')";
-    const result=await query(`SELECT o.*,t.name table_name,json_agg(json_build_object('id',oi.id,'menu_item_id',oi.menu_item_id,'item_name',oi.item_name,'unit_price',oi.unit_price,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'line_total',oi.line_total,'image_url',mi.image_url) ORDER BY oi.item_name) items FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN order_items oi ON oi.order_id=o.id LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id WHERE ${where} GROUP BY o.id,t.name ORDER BY o.created_at DESC LIMIT 200`,[req.staff!.branchId]);
-    res.json(result.rows);
-  } catch(e){next(e)}
-});
+staffRouter.get('/orders',async(req:AuthRequest,res,next)=>{try{const branchId=requestedBranch(req);const params:any[]=[branchId];let where='o.branch_id=$1';if(req.staff!.role==='kitchen')where+=" AND o.status IN ('placed','accepted','preparing','ready')";if(typeof req.query.status==='string'&&req.query.status!=='all'){params.push(req.query.status);where+=` AND o.status=$${params.length}::order_status`}if(typeof req.query.tableId==='string'){params.push(req.query.tableId);where+=` AND o.table_id=$${params.length}`}if(typeof req.query.date==='string'){params.push(req.query.date);where+=` AND o.created_at::date=$${params.length}::date`}const kitchen=req.staff!.role==='kitchen';const select=kitchen?'o.id,o.order_number,o.branch_id,o.table_id,o.status,o.notes,o.created_at,o.updated_at,t.name table_name':`o.*,t.name table_name`;const itemJson=kitchen?`json_build_object('id',oi.id,'menu_item_id',oi.menu_item_id,'item_name',oi.item_name,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'image_url',mi.image_url)`:`json_build_object('id',oi.id,'menu_item_id',oi.menu_item_id,'item_name',oi.item_name,'unit_price',oi.unit_price,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'line_total',oi.line_total,'image_url',mi.image_url)`;const result=await query(`SELECT ${select},json_agg(${itemJson} ORDER BY oi.item_name) items FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN order_items oi ON oi.order_id=o.id LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id WHERE ${where} GROUP BY o.id,t.name ORDER BY o.created_at DESC LIMIT 500`,params);res.json(result.rows)}catch(e){next(e)}});
 
-staffRouter.patch('/orders/:id/status',permit('admin','operator','kitchen'),async(req:AuthRequest,res,next)=>{
-  try {
-    const {status}=z.object({status:z.enum(['accepted','preparing','ready','served','cancelled'])}).parse(req.body);
-    if(req.staff!.role==='kitchen'&&!['accepted','preparing','ready'].includes(status))return res.status(403).json({message:'Kitchen cannot set this status'});
-    if(req.staff!.role==='operator'&&!['served','cancelled'].includes(status))return res.status(403).json({message:'Operator cannot set this status'});
-    const id=String(req.params.id);
-    await transaction(client=>nextStatus(client,id,status,req.staff!.branchId));
-    res.json(await emitOrder(req.app.get('io'),id));
-  } catch(e){next(e)}
-});
+staffRouter.get('/orders/summary',async(req:AuthRequest,res,next)=>{try{const branchId=requestedBranch(req);const result=await query("SELECT count(*) FILTER(WHERE created_at>=current_date) today_orders,count(*) FILTER(WHERE status IN ('placed','accepted','preparing')) pending_orders,count(*) FILTER(WHERE status='ready') ready_orders FROM orders WHERE branch_id=$1",[branchId]);res.json(result.rows[0])}catch(e){next(e)}});
 
-staffRouter.patch('/orders/:id/payment',permit('admin','operator'),async(req:AuthRequest,res,next)=>{
-  try {
-    const id=String(req.params.id);
-    const result=await query("UPDATE orders SET payment_status='paid',updated_at=now() WHERE id=$1 AND branch_id=$2 AND payment_method='cash' AND payment_status='pending' RETURNING id",[id,req.staff!.branchId]);
-    if(!result.rows[0]){
-      const current=await query('SELECT payment_status FROM orders WHERE id=$1 AND branch_id=$2',[id,req.staff!.branchId]);
-      if(current.rows[0]?.payment_status==='paid')return res.json(await emitOrder(req.app.get('io'),id));
-      return res.status(400).json({message:'Cash order is not pending'});
-    }
-    res.json(await emitOrder(req.app.get('io'),id));
-  } catch(e){next(e)}
-});
+staffRouter.get('/orders/:id/details',async(req:AuthRequest,res,next)=>{try{const id=String(req.params.id),branchId=requestedBranch(req);if(req.staff!.role==='kitchen'){const result=await query(`SELECT o.id,o.order_number,o.status,o.notes,o.created_at,t.name table_name,json_agg(json_build_object('id',oi.id,'item_name',oi.item_name,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'image_url',m.image_url) ORDER BY oi.item_name) items FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN order_items oi ON oi.order_id=o.id LEFT JOIN menu_items m ON m.id=oi.menu_item_id WHERE o.id=$1 AND o.branch_id=$2 GROUP BY o.id,t.name`,[id,branchId]);return result.rows[0]?res.json(result.rows[0]):res.status(404).json({message:'Order not found'})}const order:any=await getOrder(id);if(!order||order.branch_id!==branchId)return res.status(404).json({message:'Order not found'});res.json(order)}catch(e){next(e)}});
 
-staffRouter.get('/menu-availability',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{
-  try {
-    const result=await query('SELECT m.id,m.name,m.description,m.image_url,m.food_type,m.available,c.name category_name FROM menu_items m JOIN categories c ON c.id=m.category_id WHERE m.branch_id=$1 ORDER BY c.sort_order,m.name',[req.staff!.branchId]);
-    res.json(result.rows);
-  } catch(e){next(e)}
-});
+staffRouter.patch('/orders/:id/status',permit('admin','operator','kitchen'),async(req:AuthRequest,res,next)=>{try{const{status,reason}=z.object({status:z.enum(['accepted','preparing','ready','served','cancelled']),reason:z.string().max(500).optional()}).parse(req.body);const role=req.staff!.role;if(role==='kitchen'&&!['accepted','preparing','ready'].includes(status))return res.status(403).json({message:'Kitchen cannot set this status'});if(role==='operator'&&!['served','cancelled'].includes(status))return res.status(403).json({message:'Operator cannot set this status'});if(status==='cancelled'&&!reason?.trim())return res.status(400).json({message:'Cancellation reason is required'});const id=String(req.params.id),branchId=requestedBranch(req);await transaction(client=>nextStatus(client,id,status,branchId,req.staff!.id,reason,role==='admin'));const event=status==='ready'?'order:ready':'order:updated';res.json(await emitOrder(req.app.get('io'),id,event))}catch(e){next(e)}});
 
-staffRouter.patch('/menu-availability/:id',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{
-  try {
-    const {available}=z.object({available:z.boolean()}).parse(req.body);
-    const result=await query('UPDATE menu_items SET available=$1,updated_at=now() WHERE id=$2 AND branch_id=$3 RETURNING id,name,available',[available,String(req.params.id),req.staff!.branchId]);
-    if(!result.rows[0])return res.status(404).json({message:'Menu item not found'});
-    req.app.get('io').to(`branch:${req.staff!.branchId}`).emit('menu:availability',result.rows[0]);
-    res.json(result.rows[0]);
-  } catch(e){next(e)}
-});
+staffRouter.patch('/orders/:id/payment',permit('admin','operator'),async(req:AuthRequest,res,next)=>{try{const id=String(req.params.id),branchId=requestedBranch(req);await transaction(async client=>{const current=(await client.query('SELECT * FROM orders WHERE id=$1 AND branch_id=$2 FOR UPDATE',[id,branchId])).rows[0];if(!current)throw new Error('Order not found');if(current.payment_method!=='cash')throw new Error('Only cash orders can be collected manually');if(current.payment_status==='paid')return;await client.query("UPDATE orders SET payment_status='paid',payment_collected_by=$1,payment_collected_at=now(),updated_at=now() WHERE id=$2",[req.staff!.id,id]);await audit({branchId,userId:req.staff!.id,action:'order.cash_collected',entityType:'order',entityId:id,before:{payment_status:current.payment_status},after:{payment_status:'paid'}},client)});res.json(await emitOrder(req.app.get('io'),id))}catch(e){next(e)}});
 
-staffRouter.get('/analytics',permit('admin'),async(req:AuthRequest,res,next)=>{
-  try {
-    const [summary,top,daily]=await Promise.all([
-      query("SELECT count(*) orders,COALESCE(sum(total) FILTER(WHERE payment_status='paid'),0) revenue FROM orders WHERE branch_id=$1 AND created_at>=current_date",[req.staff!.branchId]),
-      query("SELECT oi.item_name,sum(oi.quantity)::int quantity,sum(oi.line_total) revenue FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.branch_id=$1 AND o.payment_status='paid' GROUP BY oi.item_name ORDER BY quantity DESC LIMIT 5",[req.staff!.branchId]),
-      query("SELECT created_at::date AS report_date,sum(total) FILTER(WHERE payment_status='paid') revenue,count(*) orders FROM orders WHERE branch_id=$1 AND created_at>=current_date-6 GROUP BY created_at::date ORDER BY created_at::date",[req.staff!.branchId])
-    ]);
-    res.json({summary:summary.rows[0],topItems:top.rows,daily:daily.rows});
-  } catch(e){next(e)}
-});
+staffRouter.get('/tables-overview',permit('admin','operator'),async(req:AuthRequest,res,next)=>{try{const branchId=requestedBranch(req);const result=await query(`SELECT t.id,t.name,t.capacity,t.active,count(o.id)::int active_orders,COALESCE(json_agg(json_build_object('id',o.id,'order_number',o.order_number,'status',o.status)) FILTER(WHERE o.id IS NOT NULL),'[]') orders FROM restaurant_tables t LEFT JOIN orders o ON o.table_id=t.id AND o.status NOT IN ('served','cancelled') WHERE t.branch_id=$1 GROUP BY t.id ORDER BY t.name`,[branchId]);res.json(result.rows)}catch(e){next(e)}});
+
+staffRouter.get('/shift-history',permit('operator'),async(req:AuthRequest,res,next)=>{try{const date=z.string().optional().parse(req.query.date);const result=await query(`SELECT o.*,t.name table_name FROM orders o JOIN restaurant_tables t ON t.id=o.table_id WHERE o.branch_id=$1 AND (o.payment_collected_by=$2 OR o.served_by=$2) AND o.created_at::date=COALESCE($3::date,current_date) ORDER BY o.created_at DESC`,[req.staff!.branchId,req.staff!.id,date||null]);res.json(result.rows)}catch(e){next(e)}});
+
+staffRouter.get('/menu-availability',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{try{const result=await query('SELECT m.id,m.name,m.description,m.image_url,m.food_type,m.available,c.name category_name FROM menu_items m JOIN categories c ON c.id=m.category_id WHERE m.branch_id=$1 ORDER BY c.sort_order,m.sort_order,m.name',[requestedBranch(req)]);res.json(result.rows)}catch(e){next(e)}});
+staffRouter.patch('/menu-availability/:id',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{try{const{available}=z.object({available:z.boolean()}).parse(req.body),branchId=requestedBranch(req),id=String(req.params.id);const before=(await query('SELECT * FROM menu_items WHERE id=$1 AND branch_id=$2',[id,branchId])).rows[0];if(!before)return res.status(404).json({message:'Menu item not found'});const result=(await query('UPDATE menu_items SET available=$1,updated_at=now() WHERE id=$2 RETURNING id,name,available',[available,id])).rows[0];await audit({branchId,userId:req.staff!.id,action:'menu.availability',entityType:'menu_item',entityId:id,before:{available:before.available},after:{available}});req.app.get('io').to(`branch:${branchId}`).emit('menu:availability',result);res.json(result)}catch(e){next(e)}});
+
+staffRouter.get('/analytics',permit('admin'),async(req:AuthRequest,res,next)=>{try{const branchId=requestedBranch(req);const[summary,top,daily]=await Promise.all([query("SELECT count(*) orders,COALESCE(sum(total) FILTER(WHERE payment_status='paid'),0) revenue FROM orders WHERE branch_id=$1 AND created_at>=current_date",[branchId]),query("SELECT oi.item_name,sum(oi.quantity)::int quantity,sum(oi.line_total) revenue FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.branch_id=$1 AND o.payment_status='paid' GROUP BY oi.item_name ORDER BY quantity DESC LIMIT 10",[branchId]),query("SELECT created_at::date AS report_date,sum(total) FILTER(WHERE payment_status='paid') revenue,count(*) orders FROM orders WHERE branch_id=$1 AND created_at>=current_date-30 GROUP BY created_at::date ORDER BY created_at::date",[branchId])]);res.json({summary:summary.rows[0],topItems:top.rows,daily:daily.rows})}catch(e){next(e)}});
