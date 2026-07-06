@@ -11,16 +11,19 @@ async function main() {
   const categories: [string,string,number][] = [["Chef's Specials",'Signature dishes from our kitchen',1],['Tandoor & Kebab','Fire-kissed classics',2],['Indian Curries','Comforting gravies and curries',3],['Rice & Breads','The perfect companions',4],['Desserts & Drinks','A sweet finish',5]];
   for (const c of categories) await db.query('INSERT INTO categories(branch_id,name,description,sort_order) VALUES($1,$2,$3,$4) ON CONFLICT(branch_id,name) DO UPDATE SET description=excluded.description,sort_order=excluded.sort_order', [branchId,...c]);
   const items: [string,string,string,number,string,string][] = [
-    ["Chef's Specials",'Royal Butter Chicken','Smoky tandoori chicken in silky tomato and cultured butter gravy',425,'non_veg','https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?w=900'],
-    ["Chef's Specials",'Paneer Lababdar','Cottage cheese, tomato, cashew and fragrant spices',345,'veg','https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=900'],
-    ['Tandoor & Kebab','Tandoori Chicken','Charred in the clay oven with yoghurt and Kashmiri chilli',395,'non_veg','https://images.unsplash.com/photo-1599487488170-d11ec9c172f0?w=900'],
-    ['Indian Curries','Dal Makhani','Slow-cooked black lentils finished with butter and cream',285,'veg','https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=900'],
-    ['Indian Curries','Kosha Mangsho','Bengali slow-braised mutton with potatoes and warm spices',465,'non_veg','https://images.unsplash.com/photo-1601050690597-df0568f70950?w=900'],
-    ['Rice & Breads','Lucknowi Chicken Biryani','Fragrant basmati, saffron and tender chicken, dum cooked',385,'non_veg','https://images.unsplash.com/photo-1563379926898-05f4575a45d8?w=900'],
-    ['Rice & Breads','Garlic Butter Naan','Clay-oven bread with garlic, coriander and butter',85,'veg','https://images.unsplash.com/photo-1601050690117-94f5f6fa8bd7?w=900'],
-    ['Desserts & Drinks','Baked Rasgulla','Warm baked chhena with condensed milk and pistachio',165,'veg','https://images.unsplash.com/photo-1666190094761-210f309bb7c1?w=900']
+    ["Chef's Specials",'Royal Butter Chicken','Smoky tandoori chicken in silky tomato and cultured butter gravy',425,'non_veg','/images/menu/butter-chicken.jpg'],
+    ["Chef's Specials",'Paneer Lababdar','Cottage cheese, tomato, cashew and fragrant spices',345,'veg','/images/menu/paneer-lababdar.jpg'],
+    ['Tandoor & Kebab','Tandoori Chicken','Charred in the clay oven with yoghurt and Kashmiri chilli',395,'non_veg','/images/menu/tandoori-chicken.jpg'],
+    ['Indian Curries','Dal Makhani','Slow-cooked black lentils finished with butter and cream',285,'veg','/images/menu/dal-makhani.jpg'],
+    ['Indian Curries','Kosha Mangsho','Bengali slow-braised mutton with potatoes and warm spices',465,'non_veg','/images/menu/kosha-mangsho.jpg'],
+    ['Rice & Breads','Lucknowi Chicken Biryani','Fragrant basmati, saffron and tender chicken, dum cooked',385,'non_veg','/images/menu/chicken-biryani.jpg'],
+    ['Rice & Breads','Garlic Butter Naan','Clay-oven bread with garlic, coriander and butter',85,'veg','/images/menu/garlic-naan.jpg'],
+    ['Desserts & Drinks','Baked Rasgulla','Warm baked chhena with condensed milk and pistachio',165,'veg','/images/menu/baked-rasgulla.jpg']
   ];
-  for (const i of items) await db.query('INSERT INTO menu_items(branch_id,category_id,name,description,price,food_type,image_url) SELECT $1::uuid,c.id,$3::varchar,$4::text,$5::numeric,$6::food_type,$7::text FROM categories c WHERE c.branch_id=$1::uuid AND c.name=$2::varchar AND NOT EXISTS(SELECT 1 FROM menu_items m WHERE m.branch_id=$1::uuid AND m.name=$3::varchar)', [branchId,...i]);
+  for (const i of items) {
+    await db.query('INSERT INTO menu_items(branch_id,category_id,name,description,price,food_type,image_url) SELECT $1::uuid,c.id,$3::varchar,$4::text,$5::numeric,$6::food_type,$7::text FROM categories c WHERE c.branch_id=$1::uuid AND c.name=$2::varchar AND NOT EXISTS(SELECT 1 FROM menu_items m WHERE m.branch_id=$1::uuid AND m.name=$3::varchar)', [branchId,...i]);
+    await db.query('UPDATE menu_items SET image_url=$3,updated_at=now() WHERE branch_id=$1 AND name=$2', [branchId,i[1],i[5]]);
+  }
   console.log(`Seeded. Admin: admin@indiankitchen.local / Admin@123\nTable QR token: ${table.rows[0].qr_token}`);
   await db.end();
 }
