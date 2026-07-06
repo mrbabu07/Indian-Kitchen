@@ -13,7 +13,7 @@ staffRouter.get('/orders', async (req:AuthRequest,res,next) => {
     const active=req.query.active==='true';
     let where='o.branch_id=$1';
     if(active)where+=" AND o.status NOT IN ('served','cancelled')";
-    const result=await query(`SELECT o.*,t.name table_name,json_agg(json_build_object('id',oi.id,'menu_item_id',oi.menu_item_id,'item_name',oi.item_name,'unit_price',oi.unit_price,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'line_total',oi.line_total) ORDER BY oi.item_name) items FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN order_items oi ON oi.order_id=o.id WHERE ${where} GROUP BY o.id,t.name ORDER BY o.created_at DESC LIMIT 200`,[req.staff!.branchId]);
+    const result=await query(`SELECT o.*,t.name table_name,json_agg(json_build_object('id',oi.id,'menu_item_id',oi.menu_item_id,'item_name',oi.item_name,'unit_price',oi.unit_price,'quantity',oi.quantity,'special_instructions',oi.special_instructions,'line_total',oi.line_total,'image_url',mi.image_url) ORDER BY oi.item_name) items FROM orders o JOIN restaurant_tables t ON t.id=o.table_id JOIN order_items oi ON oi.order_id=o.id LEFT JOIN menu_items mi ON mi.id=oi.menu_item_id WHERE ${where} GROUP BY o.id,t.name ORDER BY o.created_at DESC LIMIT 200`,[req.staff!.branchId]);
     res.json(result.rows);
   } catch(e){next(e)}
 });
@@ -39,6 +39,23 @@ staffRouter.patch('/orders/:id/payment',permit('admin','operator'),async(req:Aut
       return res.status(400).json({message:'Cash order is not pending'});
     }
     res.json(await emitOrder(req.app.get('io'),id));
+  } catch(e){next(e)}
+});
+
+staffRouter.get('/menu-availability',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{
+  try {
+    const result=await query('SELECT m.id,m.name,m.description,m.image_url,m.food_type,m.available,c.name category_name FROM menu_items m JOIN categories c ON c.id=m.category_id WHERE m.branch_id=$1 ORDER BY c.sort_order,m.name',[req.staff!.branchId]);
+    res.json(result.rows);
+  } catch(e){next(e)}
+});
+
+staffRouter.patch('/menu-availability/:id',permit('admin','kitchen'),async(req:AuthRequest,res,next)=>{
+  try {
+    const {available}=z.object({available:z.boolean()}).parse(req.body);
+    const result=await query('UPDATE menu_items SET available=$1,updated_at=now() WHERE id=$2 AND branch_id=$3 RETURNING id,name,available',[available,String(req.params.id),req.staff!.branchId]);
+    if(!result.rows[0])return res.status(404).json({message:'Menu item not found'});
+    req.app.get('io').to(`branch:${req.staff!.branchId}`).emit('menu:availability',result.rows[0]);
+    res.json(result.rows[0]);
   } catch(e){next(e)}
 });
 
