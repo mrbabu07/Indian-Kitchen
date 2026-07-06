@@ -6,6 +6,7 @@ A full-stack, multi-branch restaurant QR ordering and management system. Custome
 
 - Next.js 14, React, TypeScript
 - Express, PostgreSQL, Socket.io
+- Prisma ORM with serializable order/payment transactions
 - JWT + bcrypt role authentication
 - Razorpay UPI, PDFKit invoices, QRCode table codes
 
@@ -20,6 +21,7 @@ A full-stack, multi-branch restaurant QR ordering and management system. Custome
 npm install
 npm run db:migrate
 npm run db:seed
+npm run prisma:generate -w apps/api
 npm run dev
 ```
 
@@ -44,3 +46,5 @@ Seed staff login: `admin@indiankitchen.local` / `Admin@123`. Change this passwor
 - Socket.io rooms isolate events by branch
 
 All order totals are calculated inside a database transaction from current menu prices. Never expose the backend environment file or Razorpay secret in frontend variables.
+
+UPI orders are not broadcast to staff until the Razorpay signature is verified. Gateway-order creation errors trigger a compensating database rollback; failed or dismissed checkout marks the pending order failed/cancelled and restores the customer's cart for a safe retry.
