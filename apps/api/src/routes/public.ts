@@ -7,10 +7,11 @@ import { query } from '../db';
 import { prisma } from '../db/prisma';
 import { config } from '../config';
 import { emitOrder, getOrder } from '../lib/orders';
+import { orderLimiter, publicReadLimiter } from '../middleware/security';
 
 export const publicRouter = Router();
 
-publicRouter.get('/menu/:token', async (req, res, next) => {
+publicRouter.get('/menu/:token', publicReadLimiter, async (req, res, next) => {
   try {
     const t = await query('SELECT t.*,b.name branch_name,b.address,b.phone,b.gst_percent FROM restaurant_tables t JOIN branches b ON b.id=t.branch_id WHERE t.qr_token=$1 AND t.active=true AND b.active=true', [req.params.token]);
     if (!t.rows[0]) return res.status(404).json({ message: 'Table not found' });
@@ -26,7 +27,7 @@ const orderSchema = z.object({
   items: z.array(z.object({ menuItemId: z.string().uuid(), quantity: z.number().int().min(1).max(20), specialInstructions: z.string().max(300).optional() })).min(1)
 });
 
-publicRouter.post('/orders', async (req, res, next) => {
+publicRouter.post('/orders', orderLimiter, async (req, res, next) => {
   try {
     const input = orderSchema.parse(req.body);
     const created = await prisma.$transaction(async tx => {
