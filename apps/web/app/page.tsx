@@ -2,8 +2,7 @@ import Link from 'next/link';
 import { ArrowDown, ArrowRight, CalendarDays, ChefHat, Clock3, Instagram, MapPin, Phone, Quote, Sparkles, Star } from 'lucide-react';
 
 export default function Home() {
-  const menuToken=process.env.NEXT_PUBLIC_DEFAULT_TABLE_TOKEN;
-  const menuHref=menuToken?`/menu/${menuToken}`:'/menu';
+  const menuHref='/menu';
   return <main className="siteHome">
     <nav className="siteNav">
       <Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link>

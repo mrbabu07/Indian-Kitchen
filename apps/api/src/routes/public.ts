@@ -11,6 +11,14 @@ import { orderLimiter, publicReadLimiter } from '../middleware/security';
 
 export const publicRouter = Router();
 
+publicRouter.get('/default-table', publicReadLimiter, async (_req,res,next) => {
+  try {
+    const result=await query('SELECT t.qr_token FROM restaurant_tables t JOIN branches b ON b.id=t.branch_id WHERE t.active=true AND b.active=true ORDER BY t.created_at LIMIT 1');
+    if(!result.rows[0])return res.status(404).json({message:'No active table is configured'});
+    res.json({token:result.rows[0].qr_token});
+  } catch(e){next(e)}
+});
+
 publicRouter.get('/menu/:token', publicReadLimiter, async (req, res, next) => {
   try {
     const t = await query('SELECT t.*,b.name branch_name,b.address,b.phone,b.gst_percent FROM restaurant_tables t JOIN branches b ON b.id=t.branch_id WHERE t.qr_token=$1 AND t.active=true AND b.active=true', [req.params.token]);
