@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { BarChart3, BellRing, ChefHat, Clock3, Download, Edit3, Eye, EyeOff, IndianRupee, LayoutDashboard, LogOut, Menu, Plus, QrCode, RefreshCcw, Settings, Trash2, Users, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { API, api, money } from '@/lib/api';
+import ProfessionalOrderBoard from './OrderBoard';
 
 const nextStatus:any={placed:'accepted',accepted:'preparing',preparing:'ready',ready:'served'};
 const actionLabel:any={accepted:'Accept order',preparing:'Start preparing',ready:'Mark ready',served:'Mark served'};
@@ -54,7 +55,7 @@ export default function Dashboard({params}:{params:{role:string}}) {
     <aside className="sidebar"><div className="brand light"><span>IK</span> Indian Kitchen</div><nav><button className={tab==='orders'?'active':''} onClick={()=>setTab('orders')}><LayoutDashboard/> Live orders</button>{params.role==='admin'&&<><button className={tab==='menu'?'active':''} onClick={()=>openResource('menu')}><Menu/> Menu items</button><button className={tab==='categories'?'active':''} onClick={()=>openResource('categories')}><RefreshCcw/> Categories</button><button className={tab==='tables'?'active':''} onClick={()=>openResource('tables')}><QrCode/> Tables & QR</button><button className={tab==='staff'?'active':''} onClick={()=>openResource('staff')}><Users/> Staff</button><button className={tab==='analytics'?'active':''} onClick={()=>setTab('analytics')}><BarChart3/> Analytics</button><button className={tab==='settings'?'active':''} onClick={()=>openResource('settings')}><Settings/> Restaurant settings</button></>}</nav><div className="staffMini"><span>{staff.name[0]}</span><div><b>{staff.name}</b><small>{staff.role}</small></div><button aria-label="Log out" onClick={()=>{localStorage.clear();router.push('/staff/login')}}><LogOut/></button></div></aside>
     <section className="workspace"><header><div><p className="eyebrow red">{staff.role} workspace</p><h1>{title}</h1></div><div className="live"><i/> Live</div></header>
       {loading&&<div className="adminLoading">Loading controlsâ€¦</div>}
-      {tab==='orders'&&<OrderBoard orders={visibleOrders} active={active} role={params.role} update={updateOrder} paid={markPaid}/>}
+      {tab==='orders'&&<ProfessionalOrderBoard orders={visibleOrders} active={active} role={params.role} update={updateOrder} paid={markPaid}/>}
       {tab==='analytics'&&analytics&&<div className="analytics"><article><p>Todayâ€™s revenue</p><h2>{money(analytics.summary.revenue)}</h2></article><article><p>Orders today</p><h2>{analytics.summary.orders}</h2></article><section><h3>Top dishes</h3>{analytics.topItems.map((item:any,index:number)=><div className="rank" key={item.item_name}><b>0{index+1}</b><span>{item.item_name}</span><em>{item.quantity} sold</em></div>)}</section></div>}
       {['menu','categories','tables','staff'].includes(tab)&&!loading&&<AdminResource type={tab} rows={resources[tab]||[]} categories={resources.categories||[]} reload={()=>openResource(tab)}/>}
       {tab==='settings'&&!loading&&<SettingsPanel branch={resources.branches?.[0]} reload={()=>openResource('settings')}/>}
