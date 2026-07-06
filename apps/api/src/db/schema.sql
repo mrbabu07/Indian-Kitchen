@@ -58,6 +58,7 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS served_by UUID REFERENCES users(id) 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_review_required BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS order_status_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
@@ -69,10 +70,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   user_id UUID REFERENCES users(id) ON DELETE SET NULL, action VARCHAR(80) NOT NULL, entity_type VARCHAR(80) NOT NULL,
   entity_id TEXT, before_data JSONB, after_data JSONB, metadata JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS reason TEXT;
 CREATE TABLE IF NOT EXISTS staff_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE, last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE, provider VARCHAR(40) NOT NULL DEFAULT 'razorpay',
+  event_type VARCHAR(80) NOT NULL, status VARCHAR(40) NOT NULL, amount NUMERIC(10,2),
+  provider_order_id TEXT, provider_payment_id TEXT, performed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  reason TEXT, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_users_branch_role ON users(branch_id,role);
 CREATE INDEX IF NOT EXISTS idx_tables_branch ON restaurant_tables(branch_id);
@@ -85,3 +94,5 @@ CREATE INDEX IF NOT EXISTS idx_status_history_order ON order_status_history(orde
 CREATE INDEX IF NOT EXISTS idx_audit_branch_created ON audit_logs(branch_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_logs(user_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON staff_sessions(user_id,last_seen_at) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_order ON payment_transactions(order_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_branch ON payment_transactions(branch_id,created_at DESC);

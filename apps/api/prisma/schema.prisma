@@ -57,6 +57,7 @@ model Branch {
   statusHistory       OrderStatusHistory[]
   auditLogs           AuditLog[]
   staffSessions       StaffSession[]
+  paymentTransactions PaymentTransaction[]
   @@map("branches")
 }
 
@@ -80,6 +81,7 @@ model User {
   statusChanges OrderStatusHistory[]
   auditLogs AuditLog[]
   sessions StaffSession[]
+  paymentTransactions PaymentTransaction[]
   @@index([branchId, role])
   @@map("users")
 }
@@ -165,6 +167,7 @@ model Order {
   cancelledBy String? @map("cancelled_by") @db.Uuid
   cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
   cancellationReason String? @map("cancellation_reason")
+  refundReviewRequired Boolean @default(false) @map("refund_review_required")
   branch Branch @relation(fields:[branchId], references:[id])
   table RestaurantTable @relation(fields:[tableId], references:[id])
   items OrderItem[]
@@ -175,6 +178,7 @@ model Order {
   server User? @relation("OrderServer",fields:[servedBy],references:[id],onDelete:SetNull)
   canceller User? @relation("OrderCanceller",fields:[cancelledBy],references:[id],onDelete:SetNull)
   statusHistory OrderStatusHistory[]
+  paymentTransactions PaymentTransaction[]
   @@index([branchId, createdAt(sort: Desc)])
   @@index([branchId, status])
   @@map("orders")
@@ -206,6 +210,7 @@ model AuditLog {
   beforeData Json? @map("before_data")
   afterData Json? @map("after_data")
   metadata Json?
+  reason String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   branch Branch? @relation(fields:[branchId],references:[id],onDelete:SetNull)
   user User? @relation(fields:[userId],references:[id],onDelete:SetNull)
@@ -226,6 +231,28 @@ model StaffSession {
   branch Branch @relation(fields:[branchId],references:[id],onDelete:Cascade)
   @@index([userId,lastSeenAt])
   @@map("staff_sessions")
+}
+
+model PaymentTransaction {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+  provider String @default("razorpay") @db.VarChar(40)
+  eventType String @map("event_type") @db.VarChar(80)
+  status String @db.VarChar(40)
+  amount Decimal? @db.Decimal(10,2)
+  providerOrderId String? @map("provider_order_id")
+  providerPaymentId String? @map("provider_payment_id")
+  performedBy String? @map("performed_by") @db.Uuid
+  reason String?
+  payload Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  branch Branch @relation(fields:[branchId],references:[id],onDelete:Cascade)
+  order Order @relation(fields:[orderId],references:[id],onDelete:Cascade)
+  user User? @relation(fields:[performedBy],references:[id],onDelete:SetNull)
+  @@index([orderId,createdAt(sort:Desc)])
+  @@index([branchId,createdAt(sort:Desc)])
+  @@map("payment_transactions")
 }
 
 model OrderItem {

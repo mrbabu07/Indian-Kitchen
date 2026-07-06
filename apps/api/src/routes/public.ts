@@ -101,6 +101,7 @@ publicRouter.post('/orders/:id/verify-payment', async (req, res, next) => {
     const expected = crypto.createHmac('sha256', secret).update(`${body.razorpay_order_id}|${body.razorpay_payment_id}`).digest('hex');
     if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(body.razorpay_signature))) {
       await prisma.$transaction(tx => tx.order.update({ where: { id: order.id }, data: { paymentStatus: 'failed', status: 'cancelled' } }));
+      await query("INSERT INTO payment_transactions(branch_id,order_id,provider,event_type,status,amount,provider_order_id,provider_payment_id,payload) VALUES($1,$2,'razorpay','signature_verification','failed',$3,$4,$5,$6::jsonb)",[order.branchId,order.id,order.total.toString(),body.razorpay_order_id,body.razorpay_payment_id,JSON.stringify(body)]);
       return res.status(400).json({ message: 'Payment verification failed' });
     }
     await prisma.$transaction(async tx => {
@@ -108,6 +109,7 @@ publicRouter.post('/orders/:id/verify-payment', async (req, res, next) => {
       if (current.paymentStatus !== 'pending' || current.status === 'cancelled') throw new Error('Order is no longer payable');
       await tx.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', razorpayPaymentId: body.razorpay_payment_id } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await query("INSERT INTO payment_transactions(branch_id,order_id,provider,event_type,status,amount,provider_order_id,provider_payment_id,payload) VALUES($1,$2,'razorpay','payment_verified','paid',$3,$4,$5,$6::jsonb)",[order.branchId,order.id,order.total.toString(),body.razorpay_order_id,body.razorpay_payment_id,JSON.stringify(body)]);
     res.json(await emitOrder(req.app.get('io'), order.id, 'order:new'));
   } catch (e) { next(e); }
 });
@@ -121,6 +123,7 @@ publicRouter.post('/orders/:id/payment-failed', async (req, res, next) => {
       if (order.paymentMethod !== 'upi' || order.paymentStatus !== 'pending') throw new Error('Order cannot be rolled back');
       return tx.order.update({ where: { id }, data: { paymentStatus: 'failed', status: 'cancelled' } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await query("INSERT INTO payment_transactions(branch_id,order_id,provider,event_type,status,amount,provider_order_id) SELECT branch_id,id,'razorpay','checkout_failed','failed',total,razorpay_order_id FROM orders WHERE id=$1",[result.id]);
     res.json({ id: result.id, status: result.status, paymentStatus: result.paymentStatus, rolledBack: true });
   } catch (e) { next(e); }
 });

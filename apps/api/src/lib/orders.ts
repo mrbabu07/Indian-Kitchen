@@ -16,7 +16,7 @@ export async function nextStatus(client:PoolClient,id:string,status:string,branc
   const actorColumn:any={accepted:'accepted_by',preparing:'preparing_by',ready:'ready_by',served:'served_by',cancelled:'cancelled_by'};
   const timeColumn:any={accepted:'accepted_at',preparing:'preparing_at',ready:'ready_at',served:'served_at',cancelled:'cancelled_at'};
   const actor=actorColumn[status],time=timeColumn[status];
-  await client.query(`UPDATE orders SET status=$1::order_status,updated_at=now()${actor?`,${actor}=$3,${time}=now()`:''}${status==='cancelled'?',cancellation_reason=$4':''} WHERE id=$2`,actor?(status==='cancelled'?[status,id,userId,reason||null]:[status,id,userId]):[status,id]);
+  await client.query(`UPDATE orders SET status=$1::order_status,updated_at=now()${actor?`,${actor}=$3,${time}=now()`:''}${status==='cancelled'?',cancellation_reason=$4,refund_review_required=CASE WHEN payment_status=\'paid\' THEN true ELSE refund_review_required END':''} WHERE id=$2`,actor?(status==='cancelled'?[status,id,userId,reason||null]:[status,id,userId]):[status,id]);
   await client.query('INSERT INTO order_status_history(branch_id,order_id,from_status,to_status,changed_by,reason) VALUES($1,$2,$3,$4,$5,$6)',[branchId,id,current.status,status,userId,reason||null]);
-  await audit({branchId,userId,action:override?'order.override':'order.status_change',entityType:'order',entityId:id,before:{status:current.status},after:{status},metadata:{reason}},client);
+  await audit({branchId,userId,action:override?'order.override':'order.status_change',entityType:'order',entityId:id,before:{status:current.status,payment_status:current.payment_status},after:{status,refund_review_required:status==='cancelled'&&current.payment_status==='paid'},metadata:{reason},reason},client);
 }
