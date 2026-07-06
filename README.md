@@ -25,6 +25,8 @@ npm run prisma:generate -w apps/api
 npm run dev
 ```
 
+If a development server was running during a production build and Next reports a missing chunk, restart with `npm run dev:fresh`. The build command clears stale generated output automatically.
+
 Open `http://localhost:3000`. The seed prints the QR token for Table 01; customer menu URLs use `http://localhost:3000/menu/<token>`.
 
 Seed staff login: `admin@indiankitchen.local` / `Admin@123`. Change this password before production use.
