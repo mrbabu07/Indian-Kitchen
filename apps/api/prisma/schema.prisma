@@ -54,6 +54,9 @@ model Branch {
   menuItems           MenuItem[]
   orders              Order[]
   orderItems          OrderItem[]
+  statusHistory       OrderStatusHistory[]
+  auditLogs           AuditLog[]
+  staffSessions       StaffSession[]
   @@map("branches")
 }
 
@@ -68,6 +71,15 @@ model User {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
   branch Branch @relation(fields:[branchId], references:[id], onDelete:Cascade)
+  collectedPayments Order[] @relation("PaymentCollector")
+  acceptedOrders Order[] @relation("OrderAcceptor")
+  preparingOrders Order[] @relation("OrderPreparer")
+  readyOrders Order[] @relation("OrderReadyBy")
+  servedOrders Order[] @relation("OrderServer")
+  cancelledOrders Order[] @relation("OrderCanceller")
+  statusChanges OrderStatusHistory[]
+  auditLogs AuditLog[]
+  sessions StaffSession[]
   @@index([branchId, role])
   @@map("users")
 }
@@ -112,6 +124,7 @@ model MenuItem {
   imageUrl String? @map("image_url")
   foodType food_type @default(veg) @map("food_type")
   available Boolean @default(true)
+  sortOrder Int @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
   branch Branch @relation(fields:[branchId], references:[id], onDelete:Cascade)
@@ -140,12 +153,79 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
   servedAt DateTime? @map("served_at") @db.Timestamptz(6)
+  paymentCollectedBy String? @map("payment_collected_by") @db.Uuid
+  paymentCollectedAt DateTime? @map("payment_collected_at") @db.Timestamptz(6)
+  acceptedBy String? @map("accepted_by") @db.Uuid
+  acceptedAt DateTime? @map("accepted_at") @db.Timestamptz(6)
+  preparingBy String? @map("preparing_by") @db.Uuid
+  preparingAt DateTime? @map("preparing_at") @db.Timestamptz(6)
+  readyBy String? @map("ready_by") @db.Uuid
+  readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
+  servedBy String? @map("served_by") @db.Uuid
+  cancelledBy String? @map("cancelled_by") @db.Uuid
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancellationReason String? @map("cancellation_reason")
   branch Branch @relation(fields:[branchId], references:[id])
   table RestaurantTable @relation(fields:[tableId], references:[id])
   items OrderItem[]
+  paymentCollector User? @relation("PaymentCollector",fields:[paymentCollectedBy],references:[id],onDelete:SetNull)
+  acceptor User? @relation("OrderAcceptor",fields:[acceptedBy],references:[id],onDelete:SetNull)
+  preparer User? @relation("OrderPreparer",fields:[preparingBy],references:[id],onDelete:SetNull)
+  readyStaff User? @relation("OrderReadyBy",fields:[readyBy],references:[id],onDelete:SetNull)
+  server User? @relation("OrderServer",fields:[servedBy],references:[id],onDelete:SetNull)
+  canceller User? @relation("OrderCanceller",fields:[cancelledBy],references:[id],onDelete:SetNull)
+  statusHistory OrderStatusHistory[]
   @@index([branchId, createdAt(sort: Desc)])
   @@index([branchId, status])
   @@map("orders")
+}
+
+model OrderStatusHistory {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+  fromStatus order_status? @map("from_status")
+  toStatus order_status @map("to_status")
+  changedBy String? @map("changed_by") @db.Uuid
+  reason String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  branch Branch @relation(fields:[branchId],references:[id],onDelete:Cascade)
+  order Order @relation(fields:[orderId],references:[id],onDelete:Cascade)
+  user User? @relation(fields:[changedBy],references:[id],onDelete:SetNull)
+  @@index([orderId,createdAt])
+  @@map("order_status_history")
+}
+
+model AuditLog {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId String? @map("branch_id") @db.Uuid
+  userId String? @map("user_id") @db.Uuid
+  action String @db.VarChar(80)
+  entityType String @map("entity_type") @db.VarChar(80)
+  entityId String? @map("entity_id")
+  beforeData Json? @map("before_data")
+  afterData Json? @map("after_data")
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  branch Branch? @relation(fields:[branchId],references:[id],onDelete:SetNull)
+  user User? @relation(fields:[userId],references:[id],onDelete:SetNull)
+  @@index([branchId,createdAt(sort:Desc)])
+  @@index([userId,createdAt(sort:Desc)])
+  @@map("audit_logs")
+}
+
+model StaffSession {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  branch Branch @relation(fields:[branchId],references:[id],onDelete:Cascade)
+  @@index([userId,lastSeenAt])
+  @@map("staff_sessions")
 }
 
 model OrderItem {
