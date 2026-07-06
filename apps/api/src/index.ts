@@ -34,6 +34,6 @@ app.use('/api/invoices',invoiceRouter);
 app.use((_req,res)=>res.status(404).json({message:'API route not found'}));
 app.use((err:any,_req:any,res:any,_next:any)=>{console.error(err);if(err instanceof ZodError)return res.status(400).json({message:'Invalid request',issues:err.issues});res.status(err.message==='Order not found'?404:400).json({message:err.message||'Unexpected error'})});
 
-io.use((socket,next)=>{try{const token=socket.handshake.auth.token;if(!token)return next(new Error('Authentication required'));socket.data.staff=jwt.verify(token,config.JWT_SECRET) as StaffToken;next()}catch{next(new Error('Invalid session'))}});
+io.use(async(socket,next)=>{try{const token=socket.handshake.auth.token;if(!token)return next(new Error('Authentication required'));const staff=jwt.verify(token,config.JWT_SECRET) as StaffToken;const result=await db.query("SELECT 1 FROM users u JOIN staff_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.id=$2 AND u.active=true AND s.revoked_at IS NULL AND s.expires_at>now() AND s.last_seen_at>now()-interval '30 minutes'",[staff.id,staff.sessionId]);if(!result.rows[0])return next(new Error('Session expired'));socket.data.staff=staff;next()}catch{next(new Error('Invalid session'))}});
 io.on('connection',socket=>socket.join(`branch:${socket.data.staff.branchId}`));
 server.listen(config.PORT,()=>console.log(`Indian Kitchen API on ${config.PORT}`));
