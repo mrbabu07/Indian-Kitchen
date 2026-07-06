@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { ArrowDown, ArrowRight, CalendarDays, ChefHat, Clock3, Instagram, MapPin, Phone, Quote, Sparkles, Star } from 'lucide-react';
 
 export default function Home() {
+  const menuToken=process.env.NEXT_PUBLIC_DEFAULT_TABLE_TOKEN;
+  const menuHref=menuToken?`/menu/${menuToken}`:'/menu';
   return <main className="siteHome">
     <nav className="siteNav">
       <Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link>
@@ -12,7 +14,7 @@ export default function Home() {
     <section className="cinemaHero">
       <div className="cinemaOverlay"/>
       <div className="heroMark">IK</div>
-      <div className="cinemaCopy"><p>AUTHENTIC INDIAN DINING · KOLKATA</p><h1>Every table<br/>has a <em>story.</em></h1><div className="heroRule"><span/><p>Old recipes. New memories.<br/>A kitchen that feels like home.</p></div></div>
+      <div className="cinemaCopy"><p>AUTHENTIC INDIAN DINING · KOLKATA</p><h1>Every table<br/>has a <em>story.</em></h1><div className="heroRule"><span/><p>Old recipes. New memories.<br/>A kitchen that feels like home.</p></div><Link className="heroMenuButton" href={menuHref}>VIEW MENU & ORDER <ArrowRight/></Link></div>
       <a className="scrollCue" href="#story"><span>SCROLL TO DISCOVER</span><ArrowDown/></a>
       <div className="heroHours"><Clock3/><span>OPEN TODAY<small>12:00 PM — 11:30 PM</small></span></div>
     </section>
@@ -29,7 +31,7 @@ export default function Home() {
         <article className="dishSmall dishOne"><div/><span>FROM THE TANDOOR</span><h3>Fire & spice</h3></article>
         <article className="dishSmall dishTwo"><div/><span>SWEET ENDINGS</span><h3>Made for joy</h3></article>
       </div>
-      <div className="scanPrompt"><div><Sparkles/><span>DINING WITH US?</span></div><p>Scan the QR code at your table to browse the complete menu and order at your own pace.</p></div>
+      <div className="scanPrompt"><div><Sparkles/><span>DINING WITH US?</span></div><p>Scan the QR code at your table to browse the complete menu and order at your own pace.</p><Link href={menuHref}>VIEW CUSTOMER MENU <ArrowRight/></Link></div>
     </section>
 
     <section id="experience" className="experienceBand">
