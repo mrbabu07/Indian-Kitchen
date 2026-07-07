@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   provider_order_id TEXT, provider_payment_id TEXT, performed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   reason TEXT, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS reservations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  guest_name VARCHAR(120) NOT NULL, email VARCHAR(255) NOT NULL, phone VARCHAR(30) NOT NULL,
+  guests INTEGER NOT NULL CHECK(guests BETWEEN 1 AND 30), reserved_for TIMESTAMPTZ NOT NULL,
+  occasion VARCHAR(80), notes TEXT, status VARCHAR(30) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS contact_inquiries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+  name VARCHAR(120) NOT NULL, email VARCHAR(255) NOT NULL, phone VARCHAR(30), subject VARCHAR(140), message TEXT NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'new', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS idx_users_branch_role ON users(branch_id,role);
 CREATE INDEX IF NOT EXISTS idx_tables_branch ON restaurant_tables(branch_id);
 CREATE INDEX IF NOT EXISTS idx_categories_branch ON categories(branch_id,sort_order);
@@ -96,3 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_logs(user_id,created_
 CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON staff_sessions(user_id,last_seen_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_payment_transactions_order ON payment_transactions(order_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payment_transactions_branch ON payment_transactions(branch_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reservations_branch_date ON reservations(branch_id,reserved_for);
+CREATE INDEX IF NOT EXISTS idx_reservations_status_created ON reservations(status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contact_inquiries_branch_created ON contact_inquiries(branch_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contact_inquiries_status_created ON contact_inquiries(status,created_at DESC);

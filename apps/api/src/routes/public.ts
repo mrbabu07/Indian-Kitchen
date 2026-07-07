@@ -11,6 +11,44 @@ import { orderLimiter, publicReadLimiter } from '../middleware/security';
 
 export const publicRouter = Router();
 
+publicRouter.get('/locations', publicReadLimiter, async (_req,res,next) => {
+  try {
+    const branches = await prisma.branch.findMany({ where: { active: true }, select: { id: true, name: true, address: true, phone: true }, orderBy: { createdAt: 'asc' } });
+    res.json(branches);
+  } catch(e){next(e)}
+});
+
+const reservationSchema = z.object({
+  branchId: z.string().uuid(), name: z.string().trim().min(2).max(120), email: z.string().trim().email().max(255),
+  phone: z.string().trim().min(7).max(30), guests: z.number().int().min(1).max(30), reservedFor: z.coerce.date(),
+  occasion: z.string().trim().max(80).optional(), notes: z.string().trim().max(600).optional()
+});
+
+publicRouter.post('/reservations', orderLimiter, async (req,res,next) => {
+  try {
+    const input=reservationSchema.parse(req.body);
+    if(input.reservedFor.getTime()<Date.now()+30*60*1000) return res.status(400).json({message:'Please choose a time at least 30 minutes from now'});
+    const branch=await prisma.branch.findFirst({where:{id:input.branchId,active:true},select:{id:true,name:true}});
+    if(!branch)return res.status(404).json({message:'Restaurant location not found'});
+    const reservation=await prisma.reservation.create({data:{branchId:branch.id,guestName:input.name,email:input.email.toLowerCase(),phone:input.phone,guests:input.guests,reservedFor:input.reservedFor,occasion:input.occasion||null,notes:input.notes||null}});
+    res.status(201).json({id:reservation.id,status:reservation.status,branch:branch.name,reservedFor:reservation.reservedFor});
+  } catch(e){next(e)}
+});
+
+const contactSchema=z.object({
+  branchId:z.string().uuid().optional(),name:z.string().trim().min(2).max(120),email:z.string().trim().email().max(255),
+  phone:z.string().trim().max(30).optional(),subject:z.string().trim().max(140).optional(),message:z.string().trim().min(10).max(1200)
+});
+
+publicRouter.post('/contact', orderLimiter, async (req,res,next) => {
+  try {
+    const input=contactSchema.parse(req.body);
+    if(input.branchId){const exists=await prisma.branch.count({where:{id:input.branchId,active:true}});if(!exists)return res.status(404).json({message:'Restaurant location not found'})}
+    const inquiry=await prisma.contactInquiry.create({data:{branchId:input.branchId||null,name:input.name,email:input.email.toLowerCase(),phone:input.phone||null,subject:input.subject||null,message:input.message}});
+    res.status(201).json({id:inquiry.id,status:inquiry.status,message:'Thanks — our team will get back to you shortly.'});
+  } catch(e){next(e)}
+});
+
 publicRouter.get('/default-table', publicReadLimiter, async (_req,res,next) => {
   try {
     const result=await query('SELECT t.qr_token FROM restaurant_tables t JOIN branches b ON b.id=t.branch_id WHERE t.active=true AND b.active=true ORDER BY t.created_at LIMIT 1');
