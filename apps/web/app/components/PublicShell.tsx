@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Instagram, MapPin, Phone } from 'lucide-react';
+import { ArrowRight, Clock3, Mail, MapPin, Phone } from 'lucide-react';
 
 export function PublicHeader() {
   return <nav className="publicNav">
@@ -14,10 +14,10 @@ export function PublicHeader() {
 export function PublicFooter() {
   return <footer className="publicFooter">
     <div className="footerLead"><Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link><p>Old recipes, new memories, and a generous table in the heart of Kolkata.</p></div>
-    <div><b>Explore</b><Link href="/menu">Order menu</Link><Link href="/reservation">Reservations</Link><Link href="/gallery">Gallery</Link><Link href="/blog">Journal</Link></div>
-    <div><b>Visit</b><span><MapPin />12 Park Street, Kolkata</span><a href="tel:+919876543210"><Phone />+91 98765 43210</a><span>Daily · 12 PM — 11:30 PM</span></div>
-    <div><b>Follow</b><a href="#"><Instagram />Instagram</a><Link href="/staff/login">Staff login</Link></div>
-    <small>© 2026 Indian Kitchen. All rights reserved.</small>
+    <div><b>Explore</b><Link href="/">Home</Link><Link href="/menu">Order menu</Link><Link href="/gallery">Gallery</Link><Link href="/blog">Journal</Link></div>
+    <div><b>Plan your visit</b><Link href="/reservation">Reserve a table</Link><Link href="/contact">Contact us</Link><Link href="/#story">Our story</Link><Link href="/#experience">Dining experience</Link></div>
+    <div><b>Find us</b><a href="https://maps.google.com/?q=12+Park+Street+Kolkata" target="_blank" rel="noreferrer"><MapPin />12 Park Street, Kolkata</a><a href="tel:+919876543210"><Phone />+91 98765 43210</a><a href="mailto:hello@indiankitchen.in"><Mail />hello@indiankitchen.in</a><span><Clock3 />Daily · 12 PM — 11:30 PM</span></div>
+    <small><span>© 2026 Indian Kitchen. All rights reserved.</span><Link href="/staff/login">Staff login</Link></small>
   </footer>;
 }
 

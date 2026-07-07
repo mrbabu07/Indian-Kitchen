@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ArrowDown, ArrowRight, CalendarDays, ChefHat, Clock3, Instagram, MapPin, Phone, Quote, Sparkles, Star } from 'lucide-react';
+import { ArrowDown, ArrowRight, CalendarDays, ChefHat, Clock3, MapPin, Phone, Quote, Sparkles, Star } from 'lucide-react';
+import { PublicFooter } from './components/PublicShell';
 
 export default function Home() {
   const menuHref='/menu';
@@ -46,6 +47,6 @@ export default function Home() {
 
     <section id="contact" className="visitSection"><div className="visitImage"/><div className="visitCopy"><p className="sectionKicker">VISIT US</p><h2>Your table<br/><em>is waiting.</em></h2><div className="contactLine"><MapPin/><p><b>12 Park Street</b><br/>Kolkata, West Bengal</p></div><div className="contactLine"><Phone/><p><b>+91 98765 43210</b><br/>Reservations & enquiries</p></div><div className="contactLine"><Clock3/><p><b>Daily, 12 PM — 11:30 PM</b><br/>Last kitchen order at 11 PM</p></div><Link className="reserveButton" href="/reservation">RESERVE A TABLE <ArrowRight/></Link></div></section>
 
-    <footer className="siteFooter"><Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link><p>Authentic recipes · Generous tables · Kolkata</p><div><a href="#"><Instagram/></a><a href="#contact"><MapPin/></a></div><small>© 2026 Indian Kitchen. All rights reserved.</small></footer>
+    <PublicFooter />
   </main>;
 }
