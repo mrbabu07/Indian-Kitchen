@@ -6,8 +6,8 @@ export default function Home() {
   return <main className="siteHome">
     <nav className="siteNav">
       <Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link>
-      <div className="siteLinks"><a href="#story">Our story</a><a href="#menu">The menu</a><a href="#experience">Experience</a><a href="#contact">Contact</a></div>
-      <Link className="bookButton" href="/staff/login">Staff login <ArrowRight/></Link>
+      <div className="siteLinks"><a href="#story">Our story</a><Link href="/menu">The menu</Link><Link href="/gallery">Gallery</Link><Link href="/blog">Journal</Link><Link href="/contact">Contact</Link></div>
+      <Link className="bookButton" href="/reservation">Reserve a table <ArrowRight/></Link>
     </nav>
 
     <section className="cinemaHero">
@@ -44,7 +44,7 @@ export default function Home() {
 
     <section className="testimonial"><Quote/><p>“Food should not only fill the plate.<br/>It should stay with you.”</p><span>— THE INDIAN KITCHEN PHILOSOPHY</span></section>
 
-    <section id="contact" className="visitSection"><div className="visitImage"/><div className="visitCopy"><p className="sectionKicker">VISIT US</p><h2>Your table<br/><em>is waiting.</em></h2><div className="contactLine"><MapPin/><p><b>12 Park Street</b><br/>Kolkata, West Bengal</p></div><div className="contactLine"><Phone/><p><b>+91 98765 43210</b><br/>Reservations & enquiries</p></div><div className="contactLine"><Clock3/><p><b>Daily, 12 PM — 11:30 PM</b><br/>Last kitchen order at 11 PM</p></div><a className="reserveButton" href="tel:+919876543210">RESERVE A TABLE <ArrowRight/></a></div></section>
+    <section id="contact" className="visitSection"><div className="visitImage"/><div className="visitCopy"><p className="sectionKicker">VISIT US</p><h2>Your table<br/><em>is waiting.</em></h2><div className="contactLine"><MapPin/><p><b>12 Park Street</b><br/>Kolkata, West Bengal</p></div><div className="contactLine"><Phone/><p><b>+91 98765 43210</b><br/>Reservations & enquiries</p></div><div className="contactLine"><Clock3/><p><b>Daily, 12 PM — 11:30 PM</b><br/>Last kitchen order at 11 PM</p></div><Link className="reserveButton" href="/reservation">RESERVE A TABLE <ArrowRight/></Link></div></section>
 
     <footer className="siteFooter"><Link className="siteLogo" href="/"><i>IK</i><span>INDIAN<small>KITCHEN</small></span></Link><p>Authentic recipes · Generous tables · Kolkata</p><div><a href="#"><Instagram/></a><a href="#contact"><MapPin/></a></div><small>© 2026 Indian Kitchen. All rights reserved.</small></footer>
   </main>;
